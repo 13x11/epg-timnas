@@ -4,63 +4,58 @@ from datetime import datetime, timedelta
 import xml.etree.ElementTree as ET
 import re
 
-# Daftar tim Timnas Indonesia di Flashscore (ID bisa berubah dari waktu ke waktu)
-TEAM_URLS = {
-    "Timnas Senior": "https://www.flashscore.co.id/team/indonesia/S2UCi7M9/",
-    "Timnas U23": "https://www.flashscore.co.id/team/indonesia-u23/4kIB6Vlh/",
-    "Timnas Wanita": "https://www.flashscore.co.id/team/indonesia-women/6G8FJxRj/",
-    # Tambahan lain bisa disusulkan saat ditemukan ID-nya
-}
+# Daftar URL semua timnas (senior, wanita, U23, U20, U17, futsal)
+TEAM_URLS = [
+    "https://www.flashscore.co.id/team/indonesia/S2UCi7M9/",          # Senior
+    "https://www.flashscore.co.id/team/indonesia-women/6G8FJxRj/",    # Wanita
+    "https://www.flashscore.co.id/team/indonesia-u23/4kIB6Vlh/",      # U23
+    "https://www.flashscore.co.id/team/indonesia-u20/COtWhKyB/",      # U20
+    "https://www.flashscore.co.id/team/indonesia-u17/Kv6lAkCo/",      # U17
+    "https://www.flashscore.co.id/team/indonesia-futsal/M3Fg7Nbm/"     # Futsal
+]
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0'
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
 
 
-def fetch_team_matches(team_name, url):
-    matches = []
+def fetch_matches(url):
     try:
-        response = requests.get(url, headers=HEADERS)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        scripts = soup.find_all("script")
+        res = requests.get(url, headers=HEADERS, timeout=15)
+        soup = BeautifulSoup(res.text, 'lxml')
+        matches = []
 
-        # Ambil data dari script yang berisi initialStore (data embedded)
-        data_script = next((s for s in scripts if 'window.main' in s.text), None)
-        if not data_script:
-            return matches
+        for match in soup.select('.event__match--scheduled'):
+            team1 = match.select_one('.event__participant--home')
+            team2 = match.select_one('.event__participant--away')
+            time_el = match.select_one('.event__time')
+            date_header = match.find_previous('div', class_='event__round')
 
-        raw = data_script.text
-        json_raw = re.search(r'window.main\s*=\s*(\{.*?\});', raw)
-        if not json_raw:
-            return matches
+            if team1 and team2 and time_el:
+                match_time = time_el.text.strip()
+                match_date = date_header.text.strip() if date_header else ""
 
-        import json
-        data = json.loads(json_raw.group(1))
-        events = data.get('teams', {}).get('S2UCi7M9', {}).get('events', [])
+                # Parse tanggal (format kasar karena flashscore tidak memberi tanggal penuh)
+                title = f"{team1.text.strip()} vs {team2.text.strip()}"
+                desc = f"Pertandingan antara {team1.text.strip()} dan {team2.text.strip()} di {url.split('/')[-2]}"
 
-        for event in events:
-            ts = event.get('startTime')
-            if not ts:
-                continue
-            start_dt = datetime.fromtimestamp(ts)
-            if start_dt.year != 2025:
-                continue
-            team1 = event.get('homeTeam', {}).get('name', '')
-            team2 = event.get('awayTeam', {}).get('name', '')
-            title = f"{team1} vs {team2}"
-            desc = event.get('tournament', {}).get('name', 'Pertandingan Timnas')
+                dt_str = match.get('id', '')
+                date_match = re.search(r'match_(\d{4})(\d{2})(\d{2})', dt_str)
+                if date_match:
+                    year, month, day = date_match.groups()
+                    start_dt = datetime.strptime(f"{year}{month}{day} {match_time}", "%Y%m%d %H:%M")
+                    stop_dt = start_dt + timedelta(hours=2)
 
-            matches.append({
-                'start': start_dt,
-                'stop': start_dt + timedelta(hours=2),
-                'title': f"{title} ({team_name})",
-                'desc': desc
-            })
-
+                    matches.append({
+                        "title": title,
+                        "desc": desc,
+                        "start": start_dt,
+                        "stop": stop_dt
+                    })
+        return matches
     except Exception as e:
-        print(f"Gagal ambil data {team_name}:", e)
-
-    return matches
+        print(f"Gagal mengambil data dari {url}: {e}")
+        return []
 
 
 def generate_epg(matches):
@@ -68,13 +63,14 @@ def generate_epg(matches):
     channel = ET.SubElement(tv, "channel", id="timnas.indonesia")
     ET.SubElement(channel, "display-name").text = "Timnas Indonesia"
 
-    for match in matches:
-        programme = ET.SubElement(tv, "programme", 
-            start=match['start'].strftime('%Y%m%dT%H%M%S +0700'),
-            stop=match['stop'].strftime('%Y%m%dT%H%M%S +0700'),
-            channel="timnas.indonesia")
-        ET.SubElement(programme, "title", lang="id").text = match['title']
-        ET.SubElement(programme, "desc").text = match['desc']
+    for match in sorted(matches, key=lambda x: x['start']):
+        prog = ET.SubElement(tv, "programme", {
+            "start": match['start'].strftime("%Y%m%dT%H%M00 +0700"),
+            "stop": match['stop'].strftime("%Y%m%dT%H%M00 +0700"),
+            "channel": "timnas.indonesia"
+        })
+        ET.SubElement(prog, "title", lang="id").text = match['title']
+        ET.SubElement(prog, "desc").text = match['desc']
 
     tree = ET.ElementTree(tv)
     tree.write("epg_timnas.xml", encoding="utf-8", xml_declaration=True)
@@ -82,10 +78,8 @@ def generate_epg(matches):
 
 if __name__ == '__main__':
     all_matches = []
-    for team, url in TEAM_URLS.items():
-        print(f"Ambil jadwal {team}...")
-        all_matches.extend(fetch_team_matches(team, url))
-
-    print(f"Total pertandingan ditemukan: {len(all_matches)}")
+    for url in TEAM_URLS:
+        print(f"Mengambil data dari {url}")
+        all_matches.extend(fetch_matches(url))
     generate_epg(all_matches)
-    print("Berhasil membuat epg_timnas.xml")
+    print(f"Selesai. Total pertandingan ditemukan: {len(all_matches)}")
