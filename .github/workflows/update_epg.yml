@@ -1,35 +1,41 @@
-name: Update EPG Timnas
+name: Update EPG XML
 
 on:
   schedule:
-    - cron: '0 3 * * *'  # Setiap jam 10 pagi WIB
-  workflow_dispatch:
-
-permissions:  # ✅ Tambahkan ini
-  contents: write  # ✅ Mengizinkan push
+    - cron: '0 */6 * * *'  # Setiap 6 jam
+  workflow_dispatch:       # Bisa dijalankan manual dari GitHub
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
 
-    - name: Install dependencies
-      run: pip install --upgrade pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install beautifulsoup4 requests lxml
 
-    - name: Run scraper
-      run: python epg_scraper.py
+      - name: Run scraper script
+        run: python epg_scraper.py
 
-    - name: Commit updated XML
-      run: |
-        git config user.name "EPG Bot"
-        git config user.email "bot@epg.local"
-        git add epg_timnas.xml
-        git commit -m "Update EPG XML" || echo "No changes"
-        git push
+      - name: Commit updated XML
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add epg_timnas.xml
+          git commit -m "auto: update epg_timnas.xml" || echo "No changes to commit"
+          git push
+
+      - name: Upload epg_timnas.xml as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: epg_timnas
+          path: epg_timnas.xml
