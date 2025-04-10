@@ -1,81 +1,91 @@
 import requests
 from bs4 import BeautifulSoup
-import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
+import xml.etree.ElementTree as ET
+import re
 
-# Daftar URL timnas Indonesia berbagai kategori
-teams = {
-    "timnas_senior": {
-        "url": "https://www.flashscore.co.id/tim/indonesia/88ErHiT9/jadwal-pertandingan/",
-        "name": "Timnas Indonesia"
-    },
-    "timnas_u23": {
-        "url": "https://www.flashscore.co.id/tim/indonesia/l4Lvnhnt/jadwal-pertandingan/",
-        "name": "Timnas Indonesia U23"
-    },
-    "timnas_u20": {
-        "url": "https://www.flashscore.co.id/tim/indonesia/vLSZTFB1/jadwal-pertandingan/",
-        "name": "Timnas Indonesia U20"
-    },
-    "timnas_u17": {
-        "url": "https://www.flashscore.co.id/tim/indonesia/xbitqDLS/jadwal-pertandingan/",
-        "name": "Timnas Indonesia U17"
-    },
-    "timnas_wanita": {
-        "url": "https://www.flashscore.co.id/tim/indonesia/v7QFt446/jadwal-pertandingan/",
-        "name": "Timnas Indonesia Wanita"
-    },
-    "timnas_futsal": {
-        "url": "https://www.flashscore.co.id/tim/indonesia/vsQkbay2/jadwal-pertandingan/",
-        "name": "Timnas Indonesia Futsal"
-    }
+# Daftar tim Timnas Indonesia di Flashscore (ID bisa berubah dari waktu ke waktu)
+TEAM_URLS = {
+    "Timnas Senior": "https://www.flashscore.co.id/team/indonesia/S2UCi7M9/",
+    "Timnas U23": "https://www.flashscore.co.id/team/indonesia-u23/4kIB6Vlh/",
+    "Timnas Wanita": "https://www.flashscore.co.id/team/indonesia-women/6G8FJxRj/",
+    # Tambahan lain bisa disusulkan saat ditemukan ID-nya
 }
 
-def get_schedule(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.text, "html.parser")
-    matches = []
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0'
+}
 
-    for match in soup.select(".event__match"):
-        try:
-            date_str = match.select_one(".event__time").text.strip()
-            opponent = match.select_one(".event__participant--away").text.strip()
-            competition = match.select_one(".event__title--name").text.strip()
-            match_time = datetime.strptime(date_str, "%d.%m. %H:%M")
-            match_time = match_time.replace(year=datetime.now().year)
+
+def fetch_team_matches(team_name, url):
+    matches = []
+    try:
+        response = requests.get(url, headers=HEADERS)
+        soup = BeautifulSoup(response.content, 'html.parser')
+        scripts = soup.find_all("script")
+
+        # Ambil data dari script yang berisi initialStore (data embedded)
+        data_script = next((s for s in scripts if 'window.main' in s.text), None)
+        if not data_script:
+            return matches
+
+        raw = data_script.text
+        json_raw = re.search(r'window.main\s*=\s*(\{.*?\});', raw)
+        if not json_raw:
+            return matches
+
+        import json
+        data = json.loads(json_raw.group(1))
+        events = data.get('teams', {}).get('S2UCi7M9', {}).get('events', [])
+
+        for event in events:
+            ts = event.get('startTime')
+            if not ts:
+                continue
+            start_dt = datetime.fromtimestamp(ts)
+            if start_dt.year != 2025:
+                continue
+            team1 = event.get('homeTeam', {}).get('name', '')
+            team2 = event.get('awayTeam', {}).get('name', '')
+            title = f"{team1} vs {team2}"
+            desc = event.get('tournament', {}).get('name', 'Pertandingan Timnas')
 
             matches.append({
-                "title": opponent,
-                "start": match_time,
-                "end": match_time + timedelta(hours=2),
-                "desc": competition
+                'start': start_dt,
+                'stop': start_dt + timedelta(hours=2),
+                'title': f"{title} ({team_name})",
+                'desc': desc
             })
-        except:
-            continue
+
+    except Exception as e:
+        print(f"Gagal ambil data {team_name}:", e)
 
     return matches
 
-# Membuat struktur XMLTV
-tv = ET.Element('tv')
 
-for key, team in teams.items():
-    channel_id = key
-    channel = ET.SubElement(tv, 'channel', id=channel_id)
-    ET.SubElement(channel, 'display-name').text = team['name']
+def generate_epg(matches):
+    tv = ET.Element("tv")
+    channel = ET.SubElement(tv, "channel", id="timnas.indonesia")
+    ET.SubElement(channel, "display-name").text = "Timnas Indonesia"
 
-    matches = get_schedule(team['url'])
     for match in matches:
-        p = ET.SubElement(tv, 'programme', {
-            'start': match['start'].strftime('%Y%m%d%H%M%S') + ' +0700',
-            'stop': match['end'].strftime('%Y%m%d%H%M%S') + ' +0700',
-            'channel': channel_id
-        })
-        ET.SubElement(p, 'title', lang="id").text = f"{team['name']} vs {match['title']}"
-        ET.SubElement(p, 'desc', lang="id").text = match['desc']
+        programme = ET.SubElement(tv, "programme", 
+            start=match['start'].strftime('%Y%m%dT%H%M%S +0700'),
+            stop=match['stop'].strftime('%Y%m%dT%H%M%S +0700'),
+            channel="timnas.indonesia")
+        ET.SubElement(programme, "title", lang="id").text = match['title']
+        ET.SubElement(programme, "desc").text = match['desc']
 
-# Simpan file XML
-tree = ET.ElementTree(tv)
-tree.write("epg_timnas.xml", encoding="utf-8", xml_declaration=True)
+    tree = ET.ElementTree(tv)
+    tree.write("epg_timnas.xml", encoding="utf-8", xml_declaration=True)
+
+
+if __name__ == '__main__':
+    all_matches = []
+    for team, url in TEAM_URLS.items():
+        print(f"Ambil jadwal {team}...")
+        all_matches.extend(fetch_team_matches(team, url))
+
+    print(f"Total pertandingan ditemukan: {len(all_matches)}")
+    generate_epg(all_matches)
+    print("Berhasil membuat epg_timnas.xml")
