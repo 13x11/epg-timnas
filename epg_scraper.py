@@ -25,6 +25,7 @@ def fetch_matches(url):
         soup = BeautifulSoup(res.text, 'lxml')
         matches = []
 
+        print(f"Jumlah elemen .event__match--scheduled di {url}: {len(soup.select('.event__match--scheduled'))}")
         for match in soup.select('.event__match--scheduled'):
             team1 = match.select_one('.event__participant--home')
             team2 = match.select_one('.event__participant--away')
