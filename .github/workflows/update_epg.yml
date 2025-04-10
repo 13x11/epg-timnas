@@ -2,8 +2,11 @@ name: Update EPG Timnas
 
 on:
   schedule:
-    - cron: '0 3 * * *'  # Setiap jam 10 pagi WIB (03:00 UTC)
-  workflow_dispatch:     # Bisa dijalankan manual juga
+    - cron: '0 3 * * *'  # Setiap jam 10 pagi WIB
+  workflow_dispatch:
+
+permissions:  # ✅ Tambahkan ini
+  contents: write  # ✅ Mengizinkan push
 
 jobs:
   build:
