@@ -2,8 +2,8 @@ name: Update EPG XML
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # Setiap 6 jam
-  workflow_dispatch:       # Bisa dijalankan manual dari GitHub
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -32,7 +32,7 @@ jobs:
           git config user.email "github-actions@github.com"
           git add epg_timnas.xml
           git commit -m "auto: update epg_timnas.xml" || echo "No changes to commit"
-          git push
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git HEAD:${{ github.ref_name }}
 
       - name: Upload epg_timnas.xml as artifact
         uses: actions/upload-artifact@v4
