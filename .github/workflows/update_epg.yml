@@ -1,0 +1,32 @@
+name: Update EPG Timnas
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # Setiap jam 10 pagi WIB (03:00 UTC)
+  workflow_dispatch:     # Bisa dijalankan manual juga
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: pip install --upgrade pip
+
+    - name: Run scraper
+      run: python epg_scraper.py
+
+    - name: Commit updated XML
+      run: |
+        git config user.name "EPG Bot"
+        git config user.email "bot@epg.local"
+        git add epg_timnas.xml
+        git commit -m "Update EPG XML" || echo "No changes"
+        git push
